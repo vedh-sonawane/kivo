@@ -8,9 +8,13 @@
 
 #include "dispatcher.h"
 
-// The v1 handshake operations (no hardware dependency).
-void handlePing(ProtocolIO& io, uint16_t id, const char* args);
-void handleIdentify(ProtocolIO& io, uint16_t id, const char* args);
+// Core / handshake.
+void handlePing(DeviceContext& ctx, uint16_t id, const char* args);
+void handleIdentify(DeviceContext& ctx, uint16_t id, const char* args);
+
+// Display capability.
+void handleDisplayWrite(DeviceContext& ctx, uint16_t id, const char* args);
+void handleDisplayClear(DeviceContext& ctx, uint16_t id, const char* args);
 
 // Registry consumed by main.cpp when constructing the Dispatcher.
 extern const CommandHandler KIVO_HANDLERS[];

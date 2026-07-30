@@ -114,6 +114,18 @@ class DeviceClient:
         self._identity = self._parse_identity(response.data)
         return self._identity
 
+    def display_write(self, text: str, *, row: int = 0, col: int = 0) -> None:
+        """Write ``text`` on the LCD at ``(row, col)`` (both default to 0).
+
+        Positioning defaults keep the common case simple. Out-of-range
+        coordinates are rejected by the device (:class:`DeviceError`, bad_args).
+        """
+        self.request(Operation.DISPLAY_WRITE, f"{row} {col} {text}")
+
+    def display_clear(self) -> None:
+        """Clear the LCD."""
+        self.request(Operation.DISPLAY_CLEAR)
+
     def wait_for_ready(self, timeout: float | None = None) -> Identity | None:
         """Consume events until a ``READY`` arrives; return the device identity.
 

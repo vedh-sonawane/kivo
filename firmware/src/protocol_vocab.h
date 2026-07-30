@@ -28,11 +28,13 @@
 #define KIVO_ERR_CRC_FAIL 1
 #define KIVO_ERR_MALFORMED 2
 #define KIVO_ERR_UNKNOWN_OP 3
-// 4 BAD_ARGS, 5 BUSY, 6 INTERNAL are defined by the spec for future use.
+#define KIVO_ERR_BAD_ARGS 4
+// 5 BUSY, 6 INTERNAL are defined by the spec for future use.
 
 // Human-readable error messages paired with the codes above.
 #define KIVO_ERRMSG_CRC_FAIL "crc_fail"
 #define KIVO_ERRMSG_MALFORMED "malformed"
 #define KIVO_ERRMSG_UNKNOWN_OP "unknown_op"
+#define KIVO_ERRMSG_BAD_ARGS "bad_args"
 
 #endif  // KIVO_PROTOCOL_VOCAB_H

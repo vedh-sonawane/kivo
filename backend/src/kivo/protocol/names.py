@@ -16,6 +16,8 @@ class Operation:
 
     PING = "PING"
     IDENTIFY = "SYS.IDENTIFY"
+    DISPLAY_WRITE = "DISPLAY.WRITE"
+    DISPLAY_CLEAR = "DISPLAY.CLEAR"
 
 
 class EventName:

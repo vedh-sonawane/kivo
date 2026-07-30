@@ -2,14 +2,18 @@
 
 Examples::
 
-    kivo --fake ping                 # no hardware needed
+    kivo --fake ping                       # no hardware needed
     kivo --fake identify
-    kivo --port COM3 ping            # real ELEGOO Uno on COM3
-    KIVO_SERIAL_PORT=COM3 kivo ping  # port via environment
+    kivo --fake display "Hello Kivo"
+    kivo --fake display "line 2" --row 1
+    kivo --fake clear
+    kivo --port COM3 ping                   # real ELEGOO Uno on COM3
+    KIVO_SERIAL_PORT=COM3 kivo ping         # port via environment
 
-This is the thinnest possible entry point: it wires up a transport and a
-:class:`~kivo.device.client.DeviceClient`, then calls one capability. All real
-logic lives in the layers below.
+Global options (``--port``, ``--baud``, ``--fake``, ``-v``) come before the
+subcommand. This is the thinnest possible entry point: it wires up a transport
+and a :class:`~kivo.device.client.DeviceClient`, then invokes one capability.
+All real logic lives in the layers below.
 """
 
 from __future__ import annotations
@@ -36,13 +40,16 @@ def _build_transport(args: argparse.Namespace, settings: Settings) -> Transport:
     return SerialTransport(port, baud=args.baud or settings.baud)
 
 
-def _cmd_ping(client: DeviceClient) -> int:
+# -- subcommand handlers: each takes (client, parsed args) and returns an exit code --
+
+
+def _cmd_ping(client: DeviceClient, args: argparse.Namespace) -> int:
     client.ping()
     print("PONG - device is alive")
     return 0
 
 
-def _cmd_identify(client: DeviceClient) -> int:
+def _cmd_identify(client: DeviceClient, args: argparse.Namespace) -> int:
     identity = client.identify()
     print(
         f"{identity.name} v{identity.version} "
@@ -51,10 +58,16 @@ def _cmd_identify(client: DeviceClient) -> int:
     return 0
 
 
-_COMMANDS = {
-    "ping": _cmd_ping,
-    "identify": _cmd_identify,
-}
+def _cmd_display(client: DeviceClient, args: argparse.Namespace) -> int:
+    client.display_write(args.text, row=args.row, col=args.col)
+    print(f"wrote {args.text!r} at row {args.row}, col {args.col}")
+    return 0
+
+
+def _cmd_clear(client: DeviceClient, args: argparse.Namespace) -> int:
+    client.display_clear()
+    print("display cleared")
+    return 0
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -67,7 +80,24 @@ def build_parser() -> argparse.ArgumentParser:
         help="use the in-memory device emulator instead of real hardware",
     )
     parser.add_argument("-v", "--verbose", action="store_true", help="debug logging")
-    parser.add_argument("command", choices=sorted(_COMMANDS), help="what to do")
+
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    sub.add_parser("ping", help="check the device is alive").set_defaults(
+        func=_cmd_ping
+    )
+    sub.add_parser("identify", help="print firmware name/version/protocol").set_defaults(
+        func=_cmd_identify
+    )
+
+    display = sub.add_parser("display", help="write text to the LCD")
+    display.add_argument("text", help="text to display")
+    display.add_argument("--row", type=int, default=0, help="zero-based row (default 0)")
+    display.add_argument("--col", type=int, default=0, help="zero-based column (default 0)")
+    display.set_defaults(func=_cmd_display)
+
+    sub.add_parser("clear", help="clear the LCD").set_defaults(func=_cmd_clear)
+
     return parser
 
 
@@ -86,7 +116,7 @@ def main(argv: list[str] | None = None) -> int:
             response_timeout=settings.response_timeout,
             ready_timeout=settings.ready_timeout,
         ) as client:
-            return _COMMANDS[args.command](client)
+            return args.func(client, args)
     except (DeviceError, ProtocolError, TransportTimeout) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1

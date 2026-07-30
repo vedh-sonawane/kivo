@@ -121,6 +121,8 @@ Future capabilities (e.g. sensor readings, button presses) will add new event na
 
 ## 6. Handshake & core operations (v1)
 
+### 6.1 Core / handshake
+
 These operations have no hardware dependency and exist from day one so the link itself
 can be validated end-to-end.
 
@@ -131,6 +133,25 @@ can be validated end-to-end.
 
 On boot the device emits `EVT 0 READY <name> <ver> <proto>` so the host can detect a
 connection or an unexpected reset without polling.
+
+### 6.2 Display capability
+
+Controls a character LCD. The op is capability-oriented: the host says *what* to show,
+never *how* the screen is wired.
+
+| Op              | Args                | Success response | Purpose                       |
+|-----------------|---------------------|------------------|-------------------------------|
+| `DISPLAY.WRITE` | `<row> <col> <text>`| `OK`             | Write text at a cell.         |
+| `DISPLAY.CLEAR` | —                   | `OK`             | Clear the whole screen.       |
+
+- `<row>` and `<col>` are zero-based decimal integers. `<text>` is the rest of the line
+  and may contain spaces (but not the reserved `*`).
+- The device knows its own geometry (a 16×2 LCD here). Out-of-range `<row>`/`<col>`, or a
+  missing/non-numeric coordinate, yields `RES <id> ERR 4 bad_args`. Text longer than the
+  space remaining on the row is truncated by the device — screen dimensions are a device
+  property the host does not hardcode.
+- The host convenience API defaults `<row>` and `<col>` to `0` so callers can write
+  `display_write("Hello")` without positioning.
 
 ## 7. Example exchange
 
@@ -143,10 +164,12 @@ host   →  CMD 1 SYS.IDENTIFY*XX
 device →  RES 1 OK Kivo 0.1.0 1*XX
 host   →  CMD 2 PING*XX
 device →  RES 2 OK PONG*XX
-host   →  CMD 3 DISPLAY.WRITE Hello*XX     ; (future capability)
+host   →  CMD 3 DISPLAY.WRITE 0 0 Hello*XX  ; write "Hello" at row 0, col 0
 device →  RES 3 OK*XX
-host   →  CMD 4 BOGUS*XX
-device →  RES 4 ERR 3 unknown_op*XX
+host   →  CMD 4 DISPLAY.CLEAR*XX
+device →  RES 4 OK*XX
+host   →  CMD 5 BOGUS*XX
+device →  RES 5 ERR 3 unknown_op*XX
 ```
 
 ## 8. Error handling on the wire

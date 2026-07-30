@@ -9,11 +9,12 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "protocol_io.h"
+#include "device_context.h"
 
-// A handler receives the correlation id and the argument string (everything
-// after the operation name; empty if none). It replies via `io`.
-typedef void (*HandlerFn)(ProtocolIO& io, uint16_t id, const char* args);
+// A handler receives the device services, the correlation id, and the argument
+// string (everything after the operation name; empty if none). It replies via
+// `ctx.io` and actuates hardware via the other services in `ctx`.
+typedef void (*HandlerFn)(DeviceContext& ctx, uint16_t id, const char* args);
 
 struct CommandHandler {
   const char* op;
@@ -22,14 +23,14 @@ struct CommandHandler {
 
 class Dispatcher {
  public:
-  Dispatcher(ProtocolIO& io, const CommandHandler* handlers, size_t count)
-      : io_(io), handlers_(handlers), count_(count) {}
+  Dispatcher(DeviceContext& ctx, const CommandHandler* handlers, size_t count)
+      : ctx_(ctx), handlers_(handlers), count_(count) {}
 
   // Parse and act on one raw line (mutated in place by the parser).
   void handleLine(char* line);
 
  private:
-  ProtocolIO& io_;
+  DeviceContext& ctx_;
   const CommandHandler* handlers_;
   size_t count_;
 };

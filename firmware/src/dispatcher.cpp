@@ -9,11 +9,11 @@ void Dispatcher::handleLine(char* line) {
   kivo::ParsedFrame frame;
   kivo::ParseError err = kivo::parse_frame(line, frame);
   if (err == kivo::ParseError::CRC_FAIL) {
-    io_.sendErrorEvent(KIVO_ERR_CRC_FAIL, KIVO_ERRMSG_CRC_FAIL);
+    ctx_.io.sendErrorEvent(KIVO_ERR_CRC_FAIL, KIVO_ERRMSG_CRC_FAIL);
     return;
   }
   if (err == kivo::ParseError::MALFORMED) {
-    io_.sendErrorEvent(KIVO_ERR_MALFORMED, KIVO_ERRMSG_MALFORMED);
+    ctx_.io.sendErrorEvent(KIVO_ERR_MALFORMED, KIVO_ERRMSG_MALFORMED);
     return;
   }
 
@@ -34,9 +34,9 @@ void Dispatcher::handleLine(char* line) {
 
   for (size_t i = 0; i < count_; ++i) {
     if (strcmp(op, handlers_[i].op) == 0) {
-      handlers_[i].fn(io_, frame.id, args);
+      handlers_[i].fn(ctx_, frame.id, args);
       return;
     }
   }
-  io_.sendError(frame.id, KIVO_ERR_UNKNOWN_OP, KIVO_ERRMSG_UNKNOWN_OP);
+  ctx_.io.sendError(frame.id, KIVO_ERR_UNKNOWN_OP, KIVO_ERRMSG_UNKNOWN_OP);
 }
