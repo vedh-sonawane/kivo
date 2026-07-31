@@ -1,6 +1,6 @@
 """CRC-8 tests. These values are the contract the firmware must reproduce."""
 
-from kivo.protocol.crc8 import crc8, crc8_hex
+from kivo.protocol import crc8, crc8_hex
 
 
 def test_empty_input_is_zero():

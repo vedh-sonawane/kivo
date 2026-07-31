@@ -7,7 +7,7 @@ the device *would* show without any hardware.
 import pytest
 
 from kivo.device import DeviceClient
-from kivo.protocol.errors import DeviceError, ErrorCode
+from kivo.protocol import DeviceError, ErrorCode
 from kivo.transport import FakeTransport
 
 

@@ -2,9 +2,8 @@
 
 import pytest
 
-from kivo.protocol import codec
-from kivo.protocol.errors import ProtocolError
-from kivo.protocol.messages import Frame, FrameType
+from kivo import protocol as codec
+from kivo.protocol import Frame, FrameType, ProtocolError
 
 
 def test_encode_ping_command():
@@ -50,7 +49,7 @@ def test_decode_rejects_missing_checksum():
 def test_decode_rejects_unknown_type():
     # Build a valid checksum over a bogus type so we exercise the type check,
     # not the CRC check.
-    from kivo.protocol.crc8 import crc8_hex
+    from kivo.protocol import crc8_hex
 
     payload = "XXX 1 PING"
     line = f"{payload}*{crc8_hex(payload.encode())}"

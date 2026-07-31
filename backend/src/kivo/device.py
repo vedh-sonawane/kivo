@@ -1,13 +1,10 @@
-"""The device capability layer.
+"""The device capability layer — the backend's high-level handle on Kivo.
 
-:class:`DeviceClient` is the backend's high-level handle on a Kivo device. It
-turns capability calls (``ping()``, ``identify()``, and — in future slices —
-``display_write(...)``) into protocol commands, sends them over a
-:class:`~kivo.transport.base.Transport`, and correlates the matching response.
-
-Unsolicited events are drained while waiting for responses and handed to an
-optional callback, so a ``READY`` on reset or a future sensor event is never
-lost or mistaken for a response.
+:class:`DeviceClient` turns capability calls (``ping()``, ``display_write(...)``,
+``sensor_read(...)``) into protocol commands, sends them over a
+:class:`Transport`, and correlates the matching response. Unsolicited events are
+drained while waiting and handed to an optional callback, so a ``READY`` on reset
+or a sensor event is never lost or mistaken for a response.
 """
 
 from __future__ import annotations
@@ -18,11 +15,24 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from types import TracebackType
 
-from ..protocol import codec
-from ..protocol.errors import DeviceError, ProtocolError, TransportTimeout
-from ..protocol.messages import Command, Event, Frame, FrameType, Response
-from ..protocol.names import EventName, Operation, Payload
-from ..transport.base import Transport
+from .protocol import (
+    Command,
+    DeviceError,
+    Event,
+    EventName,
+    Frame,
+    FrameType,
+    Operation,
+    Payload,
+    ProtocolError,
+    Response,
+    TransportTimeout,
+    decode,
+    encode,
+)
+from .transport import Transport
+
+_SENSOR_EVENT_FIELDS = 2  # "<name> <value>"
 
 _log = logging.getLogger(__name__)
 
@@ -39,15 +49,19 @@ EventHandler = Callable[[Event], None]
 
 @dataclass(frozen=True, slots=True)
 class Identity:
-    """Who the device is and what protocol it speaks.
-
-    Reported both by ``SYS.IDENTIFY`` and in the boot ``READY`` event, which
-    share the same ``<name> <version> <protocol>`` payload.
-    """
+    """Who the device is and what protocol it speaks (from ``READY``/IDENTIFY)."""
 
     name: str
     version: str
     protocol: int
+
+
+@dataclass(frozen=True, slots=True)
+class SensorReading:
+    """A single sensor sample, parsed from a ``SENSOR`` event or a read."""
+
+    name: str
+    value: int
 
 
 class DeviceClient:
@@ -73,8 +87,8 @@ class DeviceClient:
     def connect(self) -> None:
         """Open the link and, if the device reboots on connect, await ``READY``.
 
-        Waiting for the boot handshake is what prevents the first command from
-        being swallowed by the Uno's bootloader after the serial auto-reset.
+        Waiting for the boot handshake prevents the first command from being
+        swallowed by the Uno's bootloader after the serial auto-reset.
         """
         self._transport.open()
         if self._transport.resets_on_connect:
@@ -115,24 +129,83 @@ class DeviceClient:
         return self._identity
 
     def display_write(self, text: str, *, row: int = 0, col: int = 0) -> None:
-        """Write ``text`` on the LCD at ``(row, col)`` (both default to 0).
-
-        Positioning defaults keep the common case simple. Out-of-range
-        coordinates are rejected by the device (:class:`DeviceError`, bad_args).
-        """
+        """Write ``text`` on the LCD at ``(row, col)`` (both default to 0)."""
         self.request(Operation.DISPLAY_WRITE, f"{row} {col} {text}")
 
     def display_clear(self) -> None:
         """Clear the LCD."""
         self.request(Operation.DISPLAY_CLEAR)
 
-    def wait_for_ready(self, timeout: float | None = None) -> Identity | None:
-        """Consume events until a ``READY`` arrives; return the device identity.
+    def led_set(self, r: int, g: int, b: int) -> None:
+        """Set the RGB LED. Each channel is 0 (off) or 1 (on) — the device does
+        digital colour, so the host mixes from the 7 primaries."""
+        self.request(Operation.LED_SET, f"{r} {g} {b}")
 
-        Returns ``None`` (and logs) if no ``READY`` arrives within the timeout —
-        e.g. a device that did not actually reset. Non-``READY`` events are still
-        dispatched to the event handler.
-        """
+    def tone_play(self, freq: int, ms: int) -> None:
+        """Play a tone of ``freq`` Hz for ``ms`` milliseconds (non-blocking on the
+        device). ``freq`` 0 stops any tone."""
+        self.request(Operation.TONE_PLAY, f"{freq} {ms}")
+
+    def sensor_read(self, name: str) -> SensorReading:
+        """One-shot read of a named sensor. Raises on an unknown sensor."""
+        response = self.request(Operation.SENSOR_READ, name)
+        try:
+            return SensorReading(name=name, value=int(response.data))
+        except ValueError as exc:
+            raise ProtocolError(f"non-integer sensor value: {response.data!r}") from exc
+
+    def subscribe_sensor(self, name: str) -> None:
+        """Ask the device to start streaming ``name`` as ``SENSOR`` events."""
+        self.request(Operation.SENSOR_SUBSCRIBE, name)
+
+    def unsubscribe_sensor(self, name: str) -> None:
+        """Ask the device to stop streaming ``name``."""
+        self.request(Operation.SENSOR_UNSUBSCRIBE, name)
+
+    # -- events / streaming ---------------------------------------------------
+
+    def set_event_handler(self, handler: EventHandler | None) -> None:
+        """Set (or clear) the callback invoked for every unsolicited event."""
+        self._event_handler = handler
+
+    def pump_events(self, timeout: float = 0.0) -> None:
+        """Drain and dispatch any events currently available, then return."""
+        while True:
+            frame = self._read_frame(timeout)
+            if frame is None:
+                return
+            if frame.type is FrameType.EVT:
+                self._handle_event(Event.from_frame(frame))
+            else:
+                _log.debug("ignoring %r while pumping events", frame)
+
+    def listen(self) -> None:
+        """Block forever, dispatching events to the handler (e.g. ``kivo watch``)."""
+        while True:
+            frame = self._read_frame(self._response_timeout)
+            if frame is None:
+                continue
+            if frame.type is FrameType.EVT:
+                self._handle_event(Event.from_frame(frame))
+            else:
+                _log.debug("ignoring %r while listening", frame)
+
+    @staticmethod
+    def parse_sensor_event(event: Event) -> SensorReading | None:
+        """Parse a ``SENSOR`` event into a reading, or ``None`` if it isn't one."""
+        if event.name != EventName.SENSOR:
+            return None
+        parts = event.data.split(" ")
+        if len(parts) != _SENSOR_EVENT_FIELDS:
+            raise ProtocolError(f"malformed SENSOR event: {event.data!r}")
+        name, value = parts
+        try:
+            return SensorReading(name=name, value=int(value))
+        except ValueError as exc:
+            raise ProtocolError(f"non-integer sensor value: {value!r}") from exc
+
+    def wait_for_ready(self, timeout: float | None = None) -> Identity | None:
+        """Consume events until a ``READY`` arrives; return the device identity."""
         budget = self._ready_timeout if timeout is None else timeout
         deadline = time.monotonic() + budget
         while True:
@@ -153,24 +226,16 @@ class DeviceClient:
     # -- request/response core ------------------------------------------------
 
     def request(self, op: str, args: str = "") -> Response:
-        """Send a command and return its successful response.
-
-        Raises :class:`DeviceError` if the device reports an error,
-        :class:`TransportTimeout` if no response arrives in time.
-        """
+        """Send a command and return its successful response, raising on error."""
         response = self.send(op, args)
         if not response.ok:
             raise DeviceError(response.error_code or 0, response.error_message)
         return response
 
     def send(self, op: str, args: str = "") -> Response:
-        """Send a command and return the response (success *or* error).
-
-        Use this when you want to inspect an error response yourself; prefer
-        :meth:`request` otherwise.
-        """
+        """Send a command and return the response (success *or* error)."""
         command = Command(id=self._next_id(), op=op, args=args)
-        line = codec.encode(Frame(FrameType.CMD, command.id, command.body))
+        line = encode(Frame(FrameType.CMD, command.id, command.body))
         _log.debug("-> %s", line)
         self._transport.write_line(line)
         return self._await_response(command.id)
@@ -188,17 +253,10 @@ class DeviceClient:
                 continue
             if frame.type is FrameType.RES and frame.id == expected_id:
                 return Response.from_frame(frame)
-            # A response to a different id (e.g. a late reply after a prior
-            # timeout) — discard and keep waiting.
             _log.debug("ignoring uncorrelated frame: %r", frame)
 
     def _read_frame(self, timeout: float | None) -> Frame | None:
-        """Read and decode one frame, skipping undecodable lines.
-
-        Returns ``None`` if ``timeout`` elapses before a valid frame arrives.
-        Corrupted inbound lines (e.g. bootloader noise, a bad CRC) are logged
-        and skipped rather than ending the session.
-        """
+        """Read and decode one frame, skipping undecodable lines; ``None`` on timeout."""
         deadline = None if timeout is None else time.monotonic() + timeout
         while True:
             remaining = None if deadline is None else max(0.0, deadline - time.monotonic())
@@ -207,7 +265,7 @@ class DeviceClient:
                 return None
             _log.debug("<- %s", line)
             try:
-                return codec.decode(line)
+                return decode(line)
             except ProtocolError as exc:
                 _log.warning("discarding undecodable line %r: %s", line, exc)
                 continue

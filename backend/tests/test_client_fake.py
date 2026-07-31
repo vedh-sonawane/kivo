@@ -7,8 +7,7 @@ firmware → codec → DeviceClient — with no hardware attached.
 import pytest
 
 from kivo.device import DeviceClient
-from kivo.protocol.errors import DeviceError, ErrorCode
-from kivo.protocol.messages import Event
+from kivo.protocol import DeviceError, ErrorCode, Event
 from kivo.transport import FakeTransport
 
 

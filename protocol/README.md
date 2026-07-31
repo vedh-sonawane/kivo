@@ -153,6 +153,34 @@ never *how* the screen is wired.
 - The host convenience API defaults `<row>` and `<col>` to `0` so callers can write
   `display_write("Hello")` without positioning.
 
+### 6.3 Sensor capability
+
+Reads sensors and, on request, streams their values as events. The device names its
+sensors; the host addresses them by name and never needs to know a pin or wiring.
+
+| Op                    | Args     | Success response | Purpose                          |
+|-----------------------|----------|------------------|----------------------------------|
+| `SENSOR.READ`         | `<name>` | `OK <value>`     | One-shot read of a sensor.       |
+| `SENSOR.SUBSCRIBE`    | `<name>` | `OK`             | Begin streaming that sensor.     |
+| `SENSOR.UNSUBSCRIBE`  | `<name>` | `OK`             | Stop streaming that sensor.      |
+
+- `<name>` is a device-defined sensor id (e.g. `light`). An unknown name yields
+  `RES <id> ERR 4 bad_args`.
+- `<value>` is a raw integer in device units (e.g. a 0–1023 ADC reading). The *meaning*
+  (brightness, temperature…) is the host's to interpret — the device only reports numbers.
+
+**Streaming.** While subscribed, the device samples the sensor on its own timer and emits
+
+```
+EVT 0 SENSOR <name> <value>
+```
+
+only when the value changes by at least a device-defined threshold (so an idle sensor is
+quiet). Sampling interval and threshold are device configuration, not part of the wire
+protocol. Emission is best-effort: if the host is not draining the link, the device drops
+samples rather than blocking. Subscriptions are per-connection and reset when the device
+reboots (which happens on every host reconnect), so streams never outlive their listener.
+
 ## 7. Example exchange
 
 (Checksums shown as `XX` are illustrative; the authoritative values are asserted by the
