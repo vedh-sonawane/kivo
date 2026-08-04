@@ -1,7 +1,7 @@
 """End-to-end tests of the device layer against the firmware emulator.
 
-These prove the full stack works — DeviceClient → codec → transport → (emulated)
-firmware → codec → DeviceClient — with no hardware attached.
+These prove the full stack works - DeviceClient → codec → transport → (emulated)
+firmware → codec → DeviceClient - with no hardware attached.
 """
 
 import pytest

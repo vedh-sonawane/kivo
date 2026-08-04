@@ -1,4 +1,4 @@
-"""Kivo's Brain — the persistent, autonomous host-side mind.
+"""Kivo's Brain - the persistent, autonomous host-side mind.
 
 A :class:`Brain` owns one long-lived device connection, keeps a
 :class:`WorldState`, and runs pure :class:`Behavior`s that return
@@ -18,9 +18,13 @@ from collections import deque
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 from .device import DeviceClient, SensorReading
-from .protocol import Event
+from .protocol import DeviceError, ErrorCode, Event
+
+if TYPE_CHECKING:
+    from .vision import EmotionSource
 
 _log = logging.getLogger(__name__)
 
@@ -60,7 +64,7 @@ class ClearScreen:
 
 @dataclass(frozen=True, slots=True)
 class SetColor:
-    """Set the RGB LED. Each channel is 0 (off) or 1 (on) — digital colour."""
+    """Set the RGB LED. Each channel is 0 (off) or 1 (on) - digital colour."""
 
     r: int
     g: int
@@ -75,8 +79,15 @@ class PlayTone:
     ms: int
 
 
+@dataclass(frozen=True, slots=True)
+class SetServo:
+    """Move the servo to ``angle`` degrees (0-180). Gestures are a series of these."""
+
+    angle: int
+
+
 # The set of things a behaviour can ask for. Extend as Kivo gains outputs.
-Action = ShowText | ClearScreen | SetColor | PlayTone
+Action = ShowText | ClearScreen | SetColor | PlayTone | SetServo
 
 
 # -- behaviour base ----------------------------------------------------------
@@ -211,7 +222,7 @@ class LightClassifier:
 class PresenceEstimator:
     """Fuses ultrasonic distance and PIR motion into a stable "is someone here?".
 
-    Motion alone is unreliable — a still person (reading, resting, asleep) stops
+    Motion alone is unreliable - a still person (reading, resting, asleep) stops
     moving and a motion-only sensor decides they've gone. So presence is driven by
     *distance*: you are here while something sits within ``near_cm`` of the sensor.
     PIR motion only ever *adds* presence (it can't mark you gone), covering the
@@ -450,42 +461,112 @@ class ProximityGreeter(Behavior):
         return [ShowText(self._row, self._greeting)]
 
 
+# The servo's neutral "looking at you" angle. Gestures swing around it: lower
+# dips the head down (droop / nod-down), higher lifts it up (perk / alert).
+SERVO_CENTER = 90
+
+# Each gesture waypoint is held this many ticks (~100ms each) so the servo has
+# time to actually reach it - the difference between a readable nod and a blur.
+_GESTURE_HOLD = 2
+
+
 @dataclass(frozen=True, slots=True)
 class Mood:
-    """A named feeling Kivo expresses: an RGB colour + a short signature chirp
-    (a list of ``(freq_hz, ms)`` notes, played one per tick so they don't
-    overlap). ``chirp`` may be empty for a silent mood."""
+    """A named feeling Kivo expresses across all three outputs: an RGB ``color``,
+    a signature ``chirp`` (``(freq_hz, ms)`` notes), and a ``gesture`` (a path of
+    servo angles = body language). The chirp plays a note per tick; the gesture
+    holds each angle a couple of ticks so the motion reads clearly."""
 
     name: str
     color: tuple[int, int, int]
     chirp: tuple[tuple[int, int], ...] = ()
+    gesture: tuple[int, ...] = ()
 
 
-# Kivo's palette of moods. Colours are digital RGB (7 primaries + off); chirps
-# are kept to short, ~80ms notes so a two-note chirp finishes within a tick.
+# Kivo's palette. Colours are digital RGB (7 primaries + off). Gestures are servo
+# paths around SERVO_CENTER (90): a bigger swing + more waypoints reads as a real
+# nod / bounce / droop rather than a twitch.
 _MOODS = {
-    "away": Mood("away", (0, 0, 0)),  # nobody here: rest, dark and silent
-    "excited": Mood("excited", (0, 1, 1), ((880, 80), (1320, 80))),  # lean-in: cyan
-    "calm": Mood("calm", (0, 0, 1), ((392, 130),)),  # night / dark: blue
-    "cozy": Mood("cozy", (1, 0, 1), ((523, 80), (440, 80))),  # evening / dim: magenta
-    "cheerful": Mood("cheerful", (1, 1, 0), ((659, 80), (880, 80))),  # morning: yellow
-    "focused": Mood("focused", (1, 1, 1), ((587, 120),)),  # afternoon+bright: white
-    "content": Mood("content", (0, 1, 0), ((523, 100),)),  # default present: green
+    # -- environmental / interaction moods --
+    # nobody here: dark, silent, head slowly drooping down to rest.
+    "away": Mood("away", (0, 0, 0), (), (75, 55, 45)),
+    # lean-in: cyan, happy rising chirp, a big excited bounce.
+    "excited": Mood("excited", (0, 1, 1), ((880, 80), (1320, 80)),
+                    (90, 140, 90, 140, 110)),
+    # night / dark: blue, low soft note, a slow gentle sway.
+    "calm": Mood("calm", (0, 0, 1), ((392, 140),), (90, 100, 90)),
+    # evening / dim: magenta, gentle falling chirp, relaxed settle.
+    "cozy": Mood("cozy", (1, 0, 1), ((523, 90), (440, 90)), (90, 80, 85)),
+    # morning: yellow, bright chirp, a happy double nod.
+    "cheerful": Mood("cheerful", (1, 1, 0), ((659, 80), (880, 80)),
+                     (90, 65, 95, 65, 90)),
+    # afternoon + bright: white, single note, attentive lift.
+    "focused": Mood("focused", (1, 1, 1), ((587, 120),), (90, 100, 95)),
+    # default present: green, gentle note, a small nod.
+    "content": Mood("content", (0, 1, 0), ((523, 110),), (90, 72, 92)),
+    # -- webcam emotion moods (mirror how you look) --
+    # happy: yellow, joyful rising chirp, a big bouncy nod.
+    "happy": Mood("happy", (1, 1, 0), ((659, 80), (988, 80)),
+                  (90, 135, 80, 135, 100)),
+    # sad: blue, low falling chirp, a slow deep droop.
+    "sad": Mood("sad", (0, 0, 1), ((440, 130), (330, 150)), (90, 70, 55, 45)),
+    # surprise: white, quick high chirp, a sharp snap upward.
+    "surprise": Mood("surprise", (1, 1, 1), ((1047, 60), (1319, 60)),
+                     (90, 150, 145)),
+    # angry: red, harsh low buzz, a sharp side-to-side jitter.
+    "angry": Mood("angry", (1, 0, 0), ((196, 110), (165, 110)),
+                  (90, 108, 72, 108, 72, 90)),
+    # fear: magenta, wavery chirp, a shrinking tremble.
+    "fear": Mood("fear", (1, 0, 1), ((587, 70), (494, 70), (587, 70)),
+                 (90, 72, 62, 68, 62)),
+    # disgust: green, short low note, a recoil away and back.
+    "disgust": Mood("disgust", (0, 1, 0), ((262, 110),), (90, 60, 90)),
 }
+
+# Which _MOODS keys come from the webcam (a non-neutral detected expression).
+_EMOTION_MOODS = frozenset(
+    {"happy", "sad", "surprise", "angry", "fear", "disgust"}
+)
+
+
+def _mood_frames(mood: "Mood") -> list[list[Action]]:
+    """Lay a mood's chirp + gesture onto per-tick frames.
+
+    Chirp notes go one per tick. Each gesture angle is held ``_GESTURE_HOLD``
+    ticks (emitted only when it changes) so the servo reaches it before the next
+    move - that's what makes a nod/bounce/droop legible instead of a twitch."""
+    gesture_slots: list[int | None] = []
+    prev: int | None = None
+    for angle in mood.gesture:
+        gesture_slots.append(angle if angle != prev else None)
+        gesture_slots.extend([None] * (_GESTURE_HOLD - 1))  # hold before next move
+        prev = angle
+
+    steps = max(len(mood.chirp), len(gesture_slots))
+    frames: list[list[Action]] = []
+    for i in range(steps):
+        frame: list[Action] = []
+        if i < len(mood.chirp):
+            frame.append(PlayTone(*mood.chirp[i]))
+        if i < len(gesture_slots) and gesture_slots[i] is not None:
+            frame.append(SetServo(gesture_slots[i]))
+        frames.append(frame)
+    return frames
 
 
 class MoodEngine(Behavior):
     """Infers Kivo's mood and expresses it with the RGB LED + buzzer.
 
-    The mood is read from *behavioural and environmental cues* — the time of day,
-    the room light, whether you're present, and whether you lean in. Kivo has no
-    camera or microphone, so this is an inference of the *vibe*, not a literal
-    measurement of emotion. On a mood change it sets a colour and plays a short
-    signature chirp; the notes are emitted one per tick so they don't overlap.
+    The mood is read from cues: the time of day, the room light, whether you're
+    present, whether you lean in, and - when a webcam ``emotion`` source is wired
+    - how your face looks. A detected expression is the strongest signal: Kivo
+    mirrors it (happy → yellow bounce, sad → blue droop, angry → red jitter, ...).
+    Seeing a face also counts as being present. Without a face it falls back to
+    the environmental vibe.
 
-    Presence is re-evaluated every tick (so leaving fades Kivo to "away" even in a
-    still room), and the palette shifts through the day, so the colour genuinely
-    tracks both the hour and how you're engaging.
+    Presence is re-evaluated every tick (so leaving fades Kivo to "away"), and the
+    palette shifts through the day, so the colour tracks the hour, your engagement,
+    and your expression together.
     """
 
     def __init__(
@@ -503,6 +584,7 @@ class MoodEngine(Behavior):
         close_below: int = 20,
         close_margin: int = 10,
         chirps: bool = True,
+        emotion: "EmotionSource | None" = None,
         now: Callable[[], datetime] | None = None,
         clock: Callable[[], float] | None = None,
     ) -> None:
@@ -520,12 +602,13 @@ class MoodEngine(Behavior):
             motion_grace=motion_grace,
             now=clock,
         )
+        self._emotion = emotion
         self._now = now or datetime.now
         self._chirps = chirps
         self._light_label = "dim"
         self._close = False
         self._mood: str | None = None
-        self._pending: list[tuple[int, int]] = []
+        self._pending: list[list[Action]] = []  # remaining chirp/gesture frames
 
     def on_sensor(self, reading: SensorReading, world: WorldState) -> list[Action]:
         if reading.name == self._light_sensor:
@@ -537,28 +620,35 @@ class MoodEngine(Behavior):
         return self._recompute()
 
     def on_tick(self, world: WorldState) -> list[Action]:
-        # A mood change takes priority; otherwise drip out any queued chirp notes.
+        # A mood change takes priority; otherwise drip out the next chirp/gesture
+        # frame (so notes don't overlap and the servo has time to move).
         changed = self._recompute()
-        return changed if changed else self._next_note()
+        return changed if changed else self._next_frame()
 
     def _recompute(self) -> list[Action]:
         mood = self._pick()
         if mood.name == self._mood:
             return []
         self._mood = mood.name
-        self._pending = list(mood.chirp) if self._chirps else []
-        return [SetColor(*mood.color), *self._next_note()]
+        frames = _mood_frames(mood)
+        if not self._chirps:  # chirps off -> keep gestures, drop the notes
+            frames = [[a for a in f if not isinstance(a, PlayTone)] for f in frames]
+        self._pending = frames[1:]
+        first = frames[0] if frames else []
+        return [SetColor(*mood.color), *first]
 
-    def _next_note(self) -> list[Action]:
-        if not self._pending:
-            return []
-        freq, ms = self._pending.pop(0)
-        return [PlayTone(freq, ms)]
+    def _next_frame(self) -> list[Action]:
+        return self._pending.pop(0) if self._pending else []
 
     def _pick(self) -> Mood:
-        present = self._presence.evaluate()
+        emotion = self._emotion.current() if self._emotion is not None else None
+        # Seeing your face is itself proof you're here, so it adds to presence.
+        present = self._presence.evaluate() or emotion is not None
         if not present:
             return _MOODS["away"]
+        # Your expression is the strongest signal - Kivo mirrors it.
+        if emotion in _EMOTION_MOODS:
+            return _MOODS[emotion]
         if self._close:
             return _MOODS["excited"]
         part = part_of_day(self._now().hour)
@@ -573,6 +663,213 @@ class MoodEngine(Behavior):
         return _MOODS["content"]
 
 
+class FocusNudge(Behavior):
+    """Notices a long, unbroken focus session and gently suggests a break.
+
+    Focus time accumulates while you're present and resets once you take a real
+    break (away for ``break_reset`` seconds); brief blips don't reset it. After
+    ``focus_after`` seconds of continuous focus Kivo nudges once (a short line +
+    a soft chime), then re-nudges every ``renudge_every`` seconds if you keep
+    going. Time is measured on the loop clock, so no sensor needs to be chatty.
+    """
+
+    def __init__(
+        self,
+        *,
+        distance_sensor: str = "distance",
+        motion_sensor: str = "presence",
+        row: int = 0,
+        focus_after: float = 45 * 60,
+        break_reset: float = 3 * 60,
+        renudge_every: float = 20 * 60,
+        near_cm: int = 120,
+        near_margin: int = 30,
+        motion_grace: float = 8.0,
+        clock: Callable[[], float] | None = None,
+    ) -> None:
+        self._estimator = PresenceEstimator(
+            distance_sensor=distance_sensor,
+            motion_sensor=motion_sensor,
+            near_cm=near_cm,
+            margin=near_margin,
+            motion_grace=motion_grace,
+            now=clock,
+        )
+        self._row = row
+        self._focus_after = focus_after
+        self._break_reset = break_reset
+        self._renudge_every = renudge_every
+        self._clock = clock or time.monotonic
+        self._focus = 0.0
+        self._away = 0.0
+        self._last_tick: float | None = None
+        self._nudged_at: float | None = None  # focus seconds at the last nudge
+
+    def on_sensor(self, reading: SensorReading, world: WorldState) -> list[Action]:
+        if self._estimator.handles(reading.name):
+            self._estimator.feed(reading)
+        return []  # timing decisions happen on the tick
+
+    def on_tick(self, world: WorldState) -> list[Action]:
+        now = self._clock()
+        if self._last_tick is None:
+            self._last_tick = now
+            return []
+        dt = now - self._last_tick
+        self._last_tick = now
+
+        if self._estimator.evaluate():
+            self._focus += dt
+            self._away = 0.0
+        else:
+            self._away += dt
+            if self._away >= self._break_reset:  # a real break: start fresh
+                self._focus = 0.0
+                self._nudged_at = None
+            return []
+
+        if self._focus >= self._focus_after and (
+            self._nudged_at is None
+            or self._focus - self._nudged_at >= self._renudge_every
+        ):
+            self._nudged_at = self._focus
+            mins = int(self._focus // 60)
+            return [
+                ShowText(self._row, f"Break? {mins} min focus"),
+                PlayTone(784, 160),
+            ]
+        return []
+
+
+class PomodoroTimer(Behavior):
+    """A simple pomodoro: alternating focus / break intervals shown on a row,
+    with a chime at each switch. Updates the display only when the shown minute
+    changes, so it barely touches the link."""
+
+    def __init__(
+        self,
+        *,
+        row: int = 1,
+        focus_min: int = 25,
+        break_min: int = 5,
+        clock: Callable[[], float] | None = None,
+    ) -> None:
+        self._row = row
+        self._focus = focus_min * 60
+        self._break = break_min * 60
+        self._clock = clock or time.monotonic
+        self._start: float | None = None
+        self._on_break = False
+        self._shown: str | None = None
+
+    def on_start(self, world: WorldState) -> list[Action]:
+        self._start = self._clock()
+        return self._render()
+
+    def on_tick(self, world: WorldState) -> list[Action]:
+        return self._render()
+
+    def _render(self) -> list[Action]:
+        if self._start is None:
+            self._start = self._clock()
+        actions: list[Action] = []
+        duration = self._break if self._on_break else self._focus
+        elapsed = self._clock() - self._start
+        if elapsed >= duration:  # switch phase
+            self._on_break = not self._on_break
+            self._start = self._clock()
+            elapsed = 0.0
+            duration = self._break if self._on_break else self._focus
+            actions.append(PlayTone(880 if self._on_break else 659, 180))
+        remaining = max(0.0, duration - elapsed)
+        mins = int(remaining // 60) + (1 if remaining % 60 else 0)
+        text = f"{'Break' if self._on_break else 'Focus'} {mins:>2}m"
+        if text != self._shown:
+            self._shown = text
+            actions.append(ShowText(self._row, text))
+        return actions
+
+
+# Self-contained reactions to a button press, expressed like moods (colour +
+# chirp + gesture) and sequenced by the same per-tick frames.
+_PET = Mood("pet", (1, 0, 1), ((880, 80), (1175, 80)), (90, 130, 95))
+_DANCE = Mood(
+    "dance", (0, 1, 1),
+    ((659, 70), (880, 70), (1047, 70), (880, 70)),
+    (60, 120, 60, 120, 90),
+)
+_ACK = Mood("ack", (0, 0, 0), (), (SERVO_CENTER,))  # calm down / dismiss
+
+
+class ButtonEvent(Behavior):
+    """Turns the raw button stream into intentional interactions.
+
+    The firmware streams ``button 1``/``button 0`` on debounced press/release;
+    this reads the timing into gestures and reacts, self-contained (colour +
+    chirp + servo), so a press never depends on any other behaviour:
+
+    * **tap** -> pet Kivo (a happy magenta bounce)
+    * **double-tap** -> a playful cyan dance
+    * **hold** -> shush / dismiss (calm down, centre, clear the line)
+
+    A single tap is only confirmed once the double-tap window passes with no
+    second tap, so a double-tap never also fires a tap.
+    """
+
+    def __init__(
+        self,
+        *,
+        sensor: str = "button",
+        row: int = 0,
+        long_press: float = 0.7,
+        double_window: float = 0.35,
+        clock: Callable[[], float] | None = None,
+    ) -> None:
+        self._sensor = sensor
+        self._row = row
+        self._long_press = long_press
+        self._double_window = double_window
+        self._clock = clock or time.monotonic
+        self._press_at: float | None = None
+        self._tap_at: float | None = None
+        self._pending: list[list[Action]] = []
+
+    def on_sensor(self, reading: SensorReading, world: WorldState) -> list[Action]:
+        if reading.name != self._sensor:
+            return []
+        now = self._clock()
+        if reading.value >= 1:  # pressed
+            self._press_at = now
+            return []
+        # released
+        press_at, self._press_at = self._press_at, None
+        if press_at is None:
+            return []
+        if now - press_at >= self._long_press:  # a hold
+            self._tap_at = None
+            return self._react(_ACK, "resting")
+        if self._tap_at is not None and now - self._tap_at <= self._double_window:
+            self._tap_at = None  # second tap in time -> double
+            return self._react(_DANCE, "wheee!")
+        self._tap_at = now  # first tap; wait for a possible second
+        return []
+
+    def on_tick(self, world: WorldState) -> list[Action]:
+        if (
+            self._tap_at is not None
+            and self._clock() - self._tap_at > self._double_window
+        ):
+            self._tap_at = None  # no second tap came -> it was a single tap
+            return self._react(_PET, "hehe :)")
+        return self._pending.pop(0) if self._pending else []
+
+    def _react(self, mood: Mood, text: str) -> list[Action]:
+        frames = _mood_frames(mood)
+        self._pending = frames[1:]
+        first = frames[0] if frames else []
+        return [SetColor(*mood.color), ShowText(self._row, text), *first]
+
+
 # -- the Brain loop ----------------------------------------------------------
 
 # How long each loop iteration waits for events. Short enough that Ctrl+C stays
@@ -582,7 +879,7 @@ _DEFAULT_POLL_INTERVAL = 0.1
 # The LCD is 16 columns wide (mirrors ``KIVO_LCD_COLS`` in firmware/src/config.h;
 # the device exposes no geometry query). The device writes text in place and does
 # NOT blank the rest of the row, so RowScroller pads/scrolls every line to the
-# full width — a shorter line then wipes any leftover characters.
+# full width - a shorter line then wipes any leftover characters.
 _LCD_COLS = 16
 
 
@@ -603,6 +900,10 @@ class Brain:
         self._events: deque[Event] = deque()
         # One marquee per row: long lines scroll instead of being truncated.
         self._scrollers: dict[int, RowScroller] = {}
+        # Action types the device rejected as unknown (e.g. old firmware or a
+        # peripheral not built) - skipped from then on so one missing capability
+        # doesn't take down the whole companion.
+        self._unsupported: set[type] = set()
 
     @property
     def world(self) -> WorldState:
@@ -672,6 +973,24 @@ class Brain:
             self._execute(action)
 
     def _execute(self, action: Action) -> None:
+        if type(action) in self._unsupported:
+            return
+        try:
+            self._perform(action)
+        except DeviceError as exc:
+            if exc.code == ErrorCode.UNKNOWN_OP:
+                # The firmware doesn't know this op - disable it and carry on so
+                # the rest of Kivo keeps working (reflash to enable it).
+                self._unsupported.add(type(action))
+                _log.warning(
+                    "device rejected %s (unknown op) - skipping it; reflash the "
+                    "firmware to enable this capability",
+                    type(action).__name__,
+                )
+            else:
+                raise
+
+    def _perform(self, action: Action) -> None:
         if isinstance(action, ShowText):
             _log.info("show row %d: %r", action.row, action.text)
             # Hand the whole line to the row's marquee: it shows what fits now and
@@ -692,6 +1011,9 @@ class Brain:
         elif isinstance(action, PlayTone):
             _log.info("tone %dHz %dms", action.freq, action.ms)
             self._client.tone_play(action.freq, action.ms)
+        elif isinstance(action, SetServo):
+            _log.info("servo %d", action.angle)
+            self._client.servo_set(action.angle)
         else:  # pragma: no cover - guards against an unhandled Action variant
             _log.warning("unknown action: %r", action)
 

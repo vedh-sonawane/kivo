@@ -10,7 +10,7 @@ range from "print human strings and parse them ad hoc" to a full binary protocol
 
 ## Decision
 
-Define the **Kivo Serial Protocol (KSP)** — a versioned, line-based, checksummed,
+Define the **Kivo Serial Protocol (KSP)** - a versioned, line-based, checksummed,
 capability-oriented text protocol. It is specified once in `/protocol/README.md` and
 implemented on both sides. See that document for the grammar.
 
@@ -26,7 +26,7 @@ operations (`DISPLAY.WRITE`, never pin numbers).
   "hardware exposes capabilities" principle. Rejected.
 - **A binary protocol** (e.g. CBOR, custom TLV) is more compact but far harder to read,
   debug, and learn from. Byte efficiency is not a constraint at 115200 baud with short
-  messages. Rejected for v1 — the framing layer is isolated so it could be swapped later
+  messages. Rejected for v1 - the framing layer is isolated so it could be swapped later
   if a real need ever appears.
 - **Text with framing + CRC** hits the sweet spot: you can read it in a serial monitor,
   it is cheap to parse in fixed buffers on 2 KB of SRAM, and corruption is detected.

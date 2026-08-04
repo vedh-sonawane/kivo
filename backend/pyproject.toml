@@ -12,6 +12,12 @@ dependencies = [
 dev = [
     "pytest>=8.0",
 ]
+# Webcam emotion sensing (kivo run --camera). Free + local: OpenCV runs a small
+# ONNX emotion model on the CPU; no paid API. Install with: pip install -e .[vision]
+vision = [
+    "opencv-python>=4.8",
+    "numpy>=1.24",
+]
 
 [project.scripts]
 kivo = "kivo.cli:main"

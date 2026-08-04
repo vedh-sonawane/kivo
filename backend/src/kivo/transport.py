@@ -1,13 +1,13 @@
 """Transport adapters for the Kivo device link.
 
 A transport is a bidirectional, line-oriented byte channel that knows nothing
-about Kivo semantics — only how to send and receive lines of text. That narrow
+about Kivo semantics - only how to send and receive lines of text. That narrow
 interface lets the real serial link and the in-memory fake be used
 interchangeably, which makes the whole backend testable with no hardware.
 
-* :class:`Transport` — the abstract port.
-* :class:`SerialTransport` — the real ELEGOO Uno over USB serial.
-* :class:`FakeTransport` — an in-memory firmware emulator for offline dev/tests.
+* :class:`Transport` - the abstract port.
+* :class:`SerialTransport` - the real ELEGOO Uno over USB serial.
+* :class:`FakeTransport` - an in-memory firmware emulator for offline dev/tests.
 """
 
 from __future__ import annotations
@@ -171,7 +171,7 @@ _INITIAL_SENSORS = {"light": 512, "presence": 0, "distance": 200}
 class FakeTransport(Transport):
     """A software stand-in that behaves like the Kivo firmware over serial.
 
-    Not a mock with canned strings — it decodes real frames with the real codec
+    Not a mock with canned strings - it decodes real frames with the real codec
     and produces real, CRC-valid responses, exercising the whole protocol stack.
     Keep the operations it understands in sync with the firmware handlers.
     """
@@ -185,6 +185,8 @@ class FakeTransport(Transport):
         self._subscribed: set[str] = set()
         self.led: tuple[int, int, int] = (0, 0, 0)  # last RGB set (for tests)
         self.tones: list[tuple[int, int]] = []  # (freq, ms) played (for tests)
+        self.servo: int | None = None  # last servo angle (for tests)
+        self.servo_moves: list[int] = []  # every angle set (for tests)
 
     @property
     def resets_on_connect(self) -> bool:
@@ -210,6 +212,11 @@ class FakeTransport(Transport):
         self._sensors[name] = value
         if name in self._subscribed:
             self._emit_event(EventName.SENSOR, f"{name} {value}")
+
+    def press_button(self, pressed: bool) -> None:
+        """Emit a debounced ``button`` event, as the firmware does on press/release
+        (the button auto-streams, so no subscription is needed)."""
+        self._emit_event(EventName.SENSOR, f"button {1 if pressed else 0}")
 
     def close(self) -> None:
         self._open = False
@@ -261,8 +268,23 @@ class FakeTransport(Transport):
             self._led_set(cmd.id, args)
         elif op == Operation.TONE_PLAY:
             self._tone_play(cmd.id, args)
+        elif op == Operation.SERVO_SET:
+            self._servo_set(cmd.id, args)
         else:
             self._respond_err(cmd.id, ErrorCode.UNKNOWN_OP, "unknown_op")
+
+    def _servo_set(self, cmd_id: int, args: str) -> None:
+        try:
+            angle = int(args)
+        except ValueError:
+            self._respond_err(cmd_id, ErrorCode.BAD_ARGS, "bad_args")
+            return
+        if not 0 <= angle <= 180:
+            self._respond_err(cmd_id, ErrorCode.BAD_ARGS, "bad_args")
+            return
+        self.servo = angle
+        self.servo_moves.append(angle)
+        self._respond_ok(cmd_id)
 
     def _led_set(self, cmd_id: int, args: str) -> None:
         parts = args.split(" ")

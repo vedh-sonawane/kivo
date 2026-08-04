@@ -1,4 +1,4 @@
-"""Per-sensor calibration — so Kivo learns *your* sensor instead of guessing.
+"""Per-sensor calibration - so Kivo learns *your* sensor instead of guessing.
 
 A photoresistor's raw numbers depend on the exact part, the divider resistor,
 the wiring, and the room. Hardcoded absolute thresholds therefore can't be right

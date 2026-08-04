@@ -27,7 +27,7 @@ Use a **single repository (monorepo)** with top-level `firmware/`, `backend/`, a
 
 ## Consequences
 
-- CI (when added) will need to run two toolchains from one repo — a minor, well-trodden
+- CI (when added) will need to run two toolchains from one repo - a minor, well-trodden
   cost.
 - If a part ever needs to be reused independently, it can be extracted later; nothing
   here prevents that.

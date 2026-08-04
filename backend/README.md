@@ -13,7 +13,7 @@ backend/
     cli.py              `kivo` command-line entry point
     protocol/           codec: frames + CRC-8 (mirrors /protocol/README.md)
     transport/          Transport port + Serial and Fake adapters
-    device/             DeviceClient — the capability API
+    device/             DeviceClient - the capability API
   tests/                pytest suite (runs against the fake transport)
 ```
 

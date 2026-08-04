@@ -16,11 +16,11 @@ the API layer, when serving concurrent clients actually requires it.
 
 ## Rationale
 
-- The device link is fundamentally **request/response over a single serial port** —
+- The device link is fundamentally **request/response over a single serial port** -
   inherently serial work. A synchronous client models it directly and is dramatically
   easier to read, test, and reason about.
 - `asyncio` serial on Windows has real sharp edges (event-loop/transport quirks). Paying
-  that cost now, before any concurrent consumer exists, is complexity for its own sake —
+  that cost now, before any concurrent consumer exists, is complexity for its own sake -
   which this project explicitly avoids.
 - When the FastAPI layer arrives, a synchronous, thread-safe `DeviceClient` can be driven
   from async handlers via a worker thread / executor. The synchronous core does not block

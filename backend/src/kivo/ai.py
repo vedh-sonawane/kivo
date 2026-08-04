@@ -1,10 +1,10 @@
-"""Kivo's AI voice — a free, **local** language model behind a narrow port.
+"""Kivo's AI voice - a free, **local** language model behind a narrow port.
 
 By hard rule Kivo's AI is free and offline: it talks to a local
 `Ollama <https://ollama.com>`_ server, never a paid/hosted API. The rest of the
 system depends only on the :class:`AiClient` protocol, so the model is swappable
 (a different local backend, or a fake in tests). Implemented with the standard
-library only (``urllib``) — no extra dependency.
+library only (``urllib``) - no extra dependency.
 
 This module holds the client and :class:`AiNarrator`, the behaviour that lets the
 model speak as Kivo. Generation runs on a **background thread** so it never
@@ -106,9 +106,9 @@ class OllamaClient:
                 body = json.loads(response.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
             # Reached Ollama, but it rejected the request. A 404 almost always
-            # means the model isn't pulled — say so, with the fix.
+            # means the model isn't pulled - say so, with the fix.
             hint = (
-                f" — is it pulled? try: ollama pull {self._model}"
+                f" - is it pulled? try: ollama pull {self._model}"
                 if exc.code == 404
                 else ""
             )
@@ -145,7 +145,7 @@ class FakeAiClient:
 # fragments). A dozen-ish words scrolls by in a second or two.
 _SYSTEM = (
     "You are Kivo, a warm and witty desk companion with a small scrolling LCD. "
-    "Reply with ONE short, complete line — a few words, no more than about a "
+    "Reply with ONE short, complete line - a few words, no more than about a "
     "dozen. No quotes, no emoji, no trailing punctuation."
 )
 
@@ -192,6 +192,8 @@ class AiNarrator(Behavior):
         near_cm: int = 120,
         near_margin: int = 30,
         motion_grace: float = 8.0,
+        emotion=None,
+        memory=None,
         now: Callable[[], datetime] | None = None,
         clock: Callable[[], float] | None = None,
         background: bool = True,
@@ -214,10 +216,13 @@ class AiNarrator(Behavior):
             motion_grace=motion_grace,
             now=clock,
         )
+        self._emotion = emotion
+        self._memory = memory
         self._last_mood: str | None = None
         self._primed = False
         self._was_present: bool | None = None
         self._was_close: bool | None = None
+        self._last_emotion: str | None = None
         self._background = background
         self._requests: queue.Queue[str] = queue.Queue()
         self._results: queue.Queue[str] = queue.Queue()
@@ -227,9 +232,12 @@ class AiNarrator(Behavior):
 
     def on_start(self, world: WorldState) -> list[Action]:
         clock, part = self._time_phrase()
+        context = self._memory.session_context() if self._memory is not None else ""
+        extra = f" What you remember: {context}." if context else ""
         self._request(
-            f"It's {clock}, {part}. Greet your human with a short, fresh, unique "
-            "welcome — make it different every time."
+            f"It's {clock}, {part}.{extra} Greet your human with a short, fresh, "
+            "unique welcome that naturally reflects any shared history - make it "
+            "different every time."
         )
         return []  # the greeting arrives via on_tick once generated
 
@@ -247,6 +255,7 @@ class AiNarrator(Behavior):
         # Re-check presence each tick so the time-based "gone" transition fires
         # even when a still, empty room is sending no readings.
         self._settle_presence()
+        self._settle_emotion()
         # Show the most recent finished line, discarding any older (stale) ones.
         line = None
         while True:
@@ -286,15 +295,33 @@ class AiNarrator(Behavior):
         self._was_present = present
         clock, _ = self._time_phrase()
         if present:
+            context = self._memory.visit_context() if self._memory is not None else ""
+            extra = f" You recall: {context}." if context else ""
             self._request(
-                f"It's {clock}. Your human just came back to the desk. Greet them "
-                "warmly with one short, fresh line."
+                f"It's {clock}. Your human just came back to the desk.{extra} Greet "
+                "them warmly with one short, fresh line."
             )
         else:
             self._request(
                 f"It's {clock}. Your human just left the desk. Say one short, warm "
                 "goodbye line."
             )
+
+    def _settle_emotion(self) -> None:
+        if self._emotion is None:
+            return
+        emotion = self._emotion.current()
+        if emotion == self._last_emotion:
+            return
+        self._last_emotion = emotion
+        # Only speak up for a real, non-neutral expression appearing.
+        if emotion is None or emotion == "neutral":
+            return
+        clock, _ = self._time_phrase()
+        self._request(
+            f"It's {clock}. You can see your human looks {emotion} right now. "
+            "Respond to how they're feeling with one short, warm, in-character line."
+        )
 
     def _on_distance(self, value: int) -> None:
         close = self._gate.update(value)

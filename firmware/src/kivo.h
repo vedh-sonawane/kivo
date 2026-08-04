@@ -11,6 +11,7 @@
 
 #include <Arduino.h>
 #include <LiquidCrystal.h>
+#include <Servo.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -112,7 +113,7 @@ class Sensor {
 
   const char* name() const { return name_; }
 
-  // Smallest change worth streaming, in this sensor's own units — analog needs a
+  // Smallest change worth streaming, in this sensor's own units - analog needs a
   // margin above its noise floor; a digital 0<->1 flip (delta 1) always matters.
   int changeThreshold() const { return changeThreshold_; }
 
@@ -287,6 +288,47 @@ class Buzzer {
 };
 
 
+// -- ServoArm: Kivo's body language via a hobby servo (header-only) -----------
+
+// The host sequences gestures from a series of setAngle() calls; the servo just
+// holds the most recent angle. write() returns immediately (the servo moves at
+// its own speed), so nothing here blocks the loop.
+class ServoArm {
+ public:
+  explicit ServoArm(uint8_t pin) : pin_(pin) {}
+  void begin() {
+    servo_.attach(pin_);
+    servo_.write(90);  // start centred, "looking at you"
+  }
+  void setAngle(uint8_t angle) { servo_.write(angle); }
+
+ private:
+  uint8_t pin_;
+  Servo servo_;
+};
+
+
+// -- Button: debounced push button, streamed as a sensor event ---------------
+
+// Polled every loop (so short taps aren't missed) with INPUT_PULLUP debounce.
+// On a debounced press/release it emits `SENSOR button 1|0`; the host turns the
+// timing into tap / double-tap / hold gestures. Defined in kivo.cpp (it needs the
+// event-name macro from config.h).
+class Button {
+ public:
+  Button(uint8_t pin, ProtocolIO& io) : pin_(pin), io_(io) {}
+  void begin();
+  void poll(unsigned long now);
+
+ private:
+  uint8_t pin_;
+  ProtocolIO& io_;
+  bool lastRaw_ = false;
+  bool stable_ = false;
+  unsigned long lastChange_ = 0;
+};
+
+
 // -- SensorManager: registry, subscriptions, and periodic streaming -----------
 
 // A sensor plus its per-connection streaming state. `primed` becomes true once
@@ -324,7 +366,7 @@ class SensorManager {
   unsigned long lastSample_;
 };
 
-// The device's sensor registry — the single place sensors are declared (kivo.cpp).
+// The device's sensor registry - the single place sensors are declared (kivo.cpp).
 extern SensorEntry KIVO_SENSORS[];
 extern const size_t KIVO_SENSOR_COUNT;
 
@@ -339,6 +381,7 @@ struct DeviceContext {
   SensorManager& sensors;
   RgbLed& led;
   Buzzer& buzzer;
+  ServoArm& servo;
 };
 
 // A handler receives the device services, the correlation id, and the argument
@@ -374,6 +417,7 @@ void handleSensorSubscribe(DeviceContext& ctx, uint16_t id, const char* args);
 void handleSensorUnsubscribe(DeviceContext& ctx, uint16_t id, const char* args);
 void handleLedSet(DeviceContext& ctx, uint16_t id, const char* args);
 void handleTonePlay(DeviceContext& ctx, uint16_t id, const char* args);
+void handleServoSet(DeviceContext& ctx, uint16_t id, const char* args);
 
 extern const CommandHandler KIVO_HANDLERS[];
 extern const size_t KIVO_HANDLER_COUNT;

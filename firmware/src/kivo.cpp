@@ -245,6 +245,25 @@ void SensorManager::poll(unsigned long now) {
 }
 
 
+// -- Button ------------------------------------------------------------------
+
+void Button::begin() { pinMode(pin_, INPUT_PULLUP); }
+
+void Button::poll(unsigned long now) {
+  bool raw = (digitalRead(pin_) == LOW);  // pressed pulls the pin to GND
+  if (raw != lastRaw_) {
+    lastRaw_ = raw;
+    lastChange_ = now;  // restart the debounce window on any bounce
+  }
+  if (now - lastChange_ >= KIVO_BUTTON_DEBOUNCE_MS && raw != stable_) {
+    stable_ = raw;
+    char data[16];
+    snprintf(data, sizeof(data), "button %d", stable_ ? 1 : 0);
+    io_.trySendEvent(KIVO_EVT_SENSOR, data);
+  }
+}
+
+
 // -- sensor registry (the single place sensors are declared) -----------------
 
 static AnalogSensor lightSensor("light", KIVO_SENSOR_LIGHT_PIN,
@@ -414,7 +433,7 @@ void handleLedSet(DeviceContext& ctx, uint16_t id, const char* args) {
 }
 
 void handleTonePlay(DeviceContext& ctx, uint16_t id, const char* args) {
-  // "freq ms" — freq 0 silences.
+  // "freq ms" - freq 0 silences.
   char* end = nullptr;
   long freq = strtol(args, &end, 10);
   if (end == args || *end != ' ' || freq < 0) {
@@ -431,6 +450,18 @@ void handleTonePlay(DeviceContext& ctx, uint16_t id, const char* args) {
   ctx.io.sendOk(id);
 }
 
+void handleServoSet(DeviceContext& ctx, uint16_t id, const char* args) {
+  // "<angle>", 0..180.
+  char* end = nullptr;
+  long angle = strtol(args, &end, 10);
+  if (end == args || *end != '\0' || angle < 0 || angle > 180) {
+    ctx.io.sendError(id, KIVO_ERR_BAD_ARGS, KIVO_ERRMSG_BAD_ARGS);
+    return;
+  }
+  ctx.servo.setAngle(static_cast<uint8_t>(angle));
+  ctx.io.sendOk(id);
+}
+
 // Operation names are matched exactly (uppercase by convention). This table is
 // the single source of registered capabilities.
 const CommandHandler KIVO_HANDLERS[] = {
@@ -443,6 +474,7 @@ const CommandHandler KIVO_HANDLERS[] = {
     {"SENSOR.UNSUBSCRIBE", handleSensorUnsubscribe},
     {"LED.SET", handleLedSet},
     {"TONE.PLAY", handleTonePlay},
+    {"SERVO.SET", handleServoSet},
 };
 
 const size_t KIVO_HANDLER_COUNT = sizeof(KIVO_HANDLERS) / sizeof(KIVO_HANDLERS[0]);

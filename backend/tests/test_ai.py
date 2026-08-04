@@ -1,6 +1,6 @@
 """Tests for the AI layer: the Ollama client, the narrator, and Brain wiring.
 
-No real model is needed — a FakeAiClient stands in, and the Ollama HTTP path is
+No real model is needed - a FakeAiClient stands in, and the Ollama HTTP path is
 exercised with a stubbed urlopen. This keeps the suite fast and offline.
 """
 
@@ -104,7 +104,7 @@ def test_narrator_flattens_whitespace_but_never_cuts_a_word():
 
 
 def test_narrator_caps_only_absurdly_long_replies_at_a_word_boundary():
-    long_reply = "word " * 40  # 200 chars — pathological, far past the cap
+    long_reply = "word " * 40  # 200 chars - pathological, far past the cap
     ai = FakeAiClient(lambda prompt, system: long_reply)
     narrator = AiNarrator(ai, background=False)
     narrator.on_start(WorldState())
@@ -189,6 +189,26 @@ def test_narrator_farewells_only_when_you_are_truly_far():
     assert narrator.on_tick(world) == []  # still here -> silent
     narrator.on_sensor(SensorReading("distance", 300), world)  # moved away
     assert narrator.on_tick(world) == [ShowText(0, "Bye now")]
+
+
+def test_narrator_speaks_to_your_facial_expression():
+    from kivo.vision import FakeEmotionSource
+
+    seen = {}
+
+    def responder(prompt, system):
+        seen["prompt"] = prompt
+        return "You okay?"
+
+    face = FakeEmotionSource(None)
+    narrator = AiNarrator(FakeAiClient(responder), emotion=face, background=False)
+    world = WorldState()
+    assert narrator.on_tick(world) == []  # no face -> nothing to react to
+    face.set("sad")
+    assert narrator.on_tick(world) == [ShowText(0, "You okay?")]
+    assert "sad" in seen["prompt"]
+    # A steady expression doesn't repeat.
+    assert narrator.on_tick(world) == []
 
 
 def test_narrator_reacts_only_when_a_person_leans_in_close():

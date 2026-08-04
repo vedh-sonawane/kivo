@@ -1,4 +1,4 @@
-"""Tests for RowScroller — the LCD marquee that reveals long lines."""
+"""Tests for RowScroller - the LCD marquee that reveals long lines."""
 
 from kivo.brain import RowScroller
 

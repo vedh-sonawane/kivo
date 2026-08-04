@@ -1,4 +1,4 @@
-# Kivo Serial Protocol (KSP) — v1
+# Kivo Serial Protocol (KSP) - v1
 
 This document is the **single source of truth** for how the backend (host) and the
 firmware (Arduino Uno) talk to each other. Both sides implement this spec:
@@ -66,7 +66,7 @@ Polynomial `0x07`, initial value `0x00`, no input/output reflection, no final XO
 
 ## 5. Message types
 
-### 5.1 `CMD` — command (host → device)
+### 5.1 `CMD` - command (host → device)
 
 The host asks the device to do something.
 
@@ -80,7 +80,7 @@ CMD <id> <op> [args]*<crc>
   `DISPLAY.WRITE`. No spaces.
 - `[args]` is everything after the op; each operation defines its own argument format.
 
-### 5.2 `RES` — response (device → host)
+### 5.2 `RES` - response (device → host)
 
 Exactly one `RES` is returned for each `CMD` the device successfully parses, carrying
 the same `<id>`.
@@ -100,9 +100,9 @@ Error codes:
 | 6    | INTERNAL      | An internal firmware error occurred.                |
 
 (Codes 1 and 2 are reserved for frame-level failures, which cannot be correlated to an
-id and are reported as events — see §8.)
+id and are reported as events - see §8.)
 
-### 5.3 `EVT` — event (device → host, unsolicited)
+### 5.3 `EVT` - event (device → host, unsolicited)
 
 The device reports something that was not requested. Events always use `id = 0`.
 
@@ -128,8 +128,8 @@ can be validated end-to-end.
 
 | Op             | Args | Success response          | Purpose                          |
 |----------------|------|---------------------------|----------------------------------|
-| `PING`         | —    | `OK PONG`                 | Liveness / round-trip check.     |
-| `SYS.IDENTIFY` | —    | `OK <name> <ver> <proto>` | Who am I, what version, what KSP. |
+| `PING`         | -    | `OK PONG`                 | Liveness / round-trip check.     |
+| `SYS.IDENTIFY` | -    | `OK <name> <ver> <proto>` | Who am I, what version, what KSP. |
 
 On boot the device emits `EVT 0 READY <name> <ver> <proto>` so the host can detect a
 connection or an unexpected reset without polling.
@@ -142,13 +142,13 @@ never *how* the screen is wired.
 | Op              | Args                | Success response | Purpose                       |
 |-----------------|---------------------|------------------|-------------------------------|
 | `DISPLAY.WRITE` | `<row> <col> <text>`| `OK`             | Write text at a cell.         |
-| `DISPLAY.CLEAR` | —                   | `OK`             | Clear the whole screen.       |
+| `DISPLAY.CLEAR` | -                   | `OK`             | Clear the whole screen.       |
 
 - `<row>` and `<col>` are zero-based decimal integers. `<text>` is the rest of the line
   and may contain spaces (but not the reserved `*`).
 - The device knows its own geometry (a 16×2 LCD here). Out-of-range `<row>`/`<col>`, or a
   missing/non-numeric coordinate, yields `RES <id> ERR 4 bad_args`. Text longer than the
-  space remaining on the row is truncated by the device — screen dimensions are a device
+  space remaining on the row is truncated by the device - screen dimensions are a device
   property the host does not hardcode.
 - The host convenience API defaults `<row>` and `<col>` to `0` so callers can write
   `display_write("Hello")` without positioning.
@@ -167,7 +167,7 @@ sensors; the host addresses them by name and never needs to know a pin or wiring
 - `<name>` is a device-defined sensor id (e.g. `light`). An unknown name yields
   `RES <id> ERR 4 bad_args`.
 - `<value>` is a raw integer in device units (e.g. a 0–1023 ADC reading). The *meaning*
-  (brightness, temperature…) is the host's to interpret — the device only reports numbers.
+  (brightness, temperature…) is the host's to interpret - the device only reports numbers.
 
 **Streaming.** While subscribed, the device samples the sensor on its own timer and emits
 
@@ -210,7 +210,7 @@ device →  RES 5 ERR 3 unknown_op*XX
   because the id *is* trustworthy in this case.
 
 The host applies a timeout while waiting for a `RES`. A missing response is a transport
-failure, surfaced to the caller — the protocol never blocks forever.
+failure, surfaced to the caller - the protocol never blocks forever.
 
 ## 9. Versioning
 

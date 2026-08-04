@@ -23,7 +23,9 @@ static SensorManager g_sensors(KIVO_SENSORS, KIVO_SENSOR_COUNT, g_io,
 static RgbLed g_led(KIVO_LED_PIN_R, KIVO_LED_PIN_G, KIVO_LED_PIN_B,
                     KIVO_LED_ACTIVE_LOW);
 static Buzzer g_buzzer(KIVO_BUZZER_PIN);
-static DeviceContext g_ctx{g_io, g_display, g_sensors, g_led, g_buzzer};
+static ServoArm g_servo(KIVO_SERVO_PIN);
+static Button g_button(KIVO_BUTTON_PIN, g_io);
+static DeviceContext g_ctx{g_io, g_display, g_sensors, g_led, g_buzzer, g_servo};
 static Dispatcher g_dispatcher(g_ctx, KIVO_HANDLERS, KIVO_HANDLER_COUNT);
 
 void setup() {
@@ -32,6 +34,8 @@ void setup() {
   g_sensors.begin();  // configure sensor pins (e.g. the PIR/ultrasonic pins)
   g_led.begin();      // LED off until the brain sets a mood colour
   g_buzzer.begin();
+  g_servo.begin();    // centre the servo, "looking at you"
+  g_button.begin();
 
   // A boot banner both confirms the LCD wiring at power-up and shows identity.
   g_display.clear();
@@ -57,4 +61,6 @@ void loop() {
 
   // Service subscribed sensors on their own cadence (non-blocking).
   g_sensors.poll(millis());
+  // Poll the button every loop so short taps aren't missed.
+  g_button.poll(millis());
 }

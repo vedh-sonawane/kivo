@@ -1,4 +1,4 @@
-"""Kivo backend — the host-side "brain" for the Kivo desk companion.
+"""Kivo backend - the host-side "brain" for the Kivo desk companion.
 
 Layering (dependencies point downward):
 

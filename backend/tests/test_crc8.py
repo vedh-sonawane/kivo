@@ -8,7 +8,7 @@ def test_empty_input_is_zero():
 
 
 def test_known_vector_matches_smbus():
-    # CRC-8/SMBUS of the ASCII digits "123456789" is 0xF4 — the standard
+    # CRC-8/SMBUS of the ASCII digits "123456789" is 0xF4 - the standard
     # check value for this polynomial. If this fails, the algorithm is wrong.
     assert crc8(b"123456789") == 0xF4
 

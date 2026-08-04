@@ -34,8 +34,11 @@ from .ai import (
 from .brain import (
     DEFAULT_SENSORS,
     Brain,
+    ButtonEvent,
+    FocusNudge,
     LightMood,
     MoodEngine,
+    PomodoroTimer,
     PresenceGreeter,
     ProximityGreeter,
     TimeGreeter,
@@ -46,6 +49,7 @@ from .device import (
     DEFAULT_RESPONSE_TIMEOUT,
     DeviceClient,
 )
+from .memory import Memory, MemoryGreeter
 from .protocol import DeviceError, ProtocolError, TransportError, TransportTimeout
 from .transport import DEFAULT_BAUD, FakeTransport, SerialTransport, Transport
 
@@ -171,7 +175,7 @@ def _cmd_calibrate(client: DeviceClient, args: argparse.Namespace) -> int:
     save_thresholds(sensor, thresholds)
     print(
         f"calibrated '{sensor}': dark < {thresholds.dark_below}, "
-        f"bright > {thresholds.bright_above}. Saved — 'kivo run' will use it now."
+        f"bright > {thresholds.bright_above}. Saved - 'kivo run' will use it now."
     )
     return 0
 
@@ -188,35 +192,65 @@ def _cmd_run(client: DeviceClient, args: argparse.Namespace) -> int:
             bright_above=thresholds.bright_above,
         )
 
+    # Optional webcam emotion sensing (free + local). Degrades to None if OpenCV,
+    # the model, or a camera isn't available - Kivo then runs without face mood.
+    emotion = None
+    if args.camera:
+        from .vision import build_source
+
+        emotion = build_source()
+        if emotion is not None:
+            print("webcam mood on - Kivo will read your expression")
+
+    light_kw = (
+        {}
+        if thresholds is None
+        else {"dark_below": thresholds.dark_below, "bright_above": thresholds.bright_above}
+    )
+
+    # Long-term memory: Kivo remembers you across sessions unless told to forget.
+    memory = None if args.forget else Memory()
+
+    # Row 1 shows a live pomodoro timer if asked, else the room's light level.
+    # Either way MoodEngine still colours the LED from the light sensor directly.
+    # Without pomodoro, a passive break-nudge watches for long focus sessions.
+    if args.pomodoro:
+        bottom = PomodoroTimer(row=1)
+        nudges: list = []
+    else:
+        bottom = light
+        nudges = [FocusNudge(row=0)]
+
     if args.ai:
         settings = Settings.from_env()
         model = args.model or settings.ollama_model
         ai = OllamaClient(
             url=settings.ollama_url, model=model, timeout=settings.ai_timeout
         )
-        # Top row = Kivo's AI voice (greeting, then fresh lines on light change,
-        # arrival/leave, and lean-in); bottom row = the factual light level.
-        if thresholds is None:
-            ai_light = AiNarrator(ai, row=0)
-        else:
-            ai_light = AiNarrator(
-                ai,
-                row=0,
-                dark_below=thresholds.dark_below,
-                bright_above=thresholds.bright_above,
-            )
-        behaviors = [ai_light, light, MoodEngine()]
+        # Top row = Kivo's AI voice; it reacts to your expression and remembers you.
+        ai_light = AiNarrator(ai, row=0, emotion=emotion, memory=memory, **light_kw)
+        behaviors = [
+            ai_light,
+            bottom,
+            MoodEngine(emotion=emotion, **light_kw),
+            ButtonEvent(row=0),
+            *nudges,
+        ]
         print(f"Kivo is awake (AI: {model}) - press Ctrl+C to stop")
     else:
-        # Row 0: wake greeting + arrival/leave + lean-in lines. Row 1: light.
-        # MoodEngine drives the RGB LED + buzzer from the inferred mood.
+        # Row 0: memory-aware greeting + lean-in + break nudges. MoodEngine drives
+        # the RGB LED + servo + buzzer. A fixed wake greeting is used if memory is off.
+        greeter = MemoryGreeter(memory, row=0) if memory is not None else TimeGreeter(row=0)
         behaviors = [
-            TimeGreeter(row=0),
-            PresenceGreeter(row=0),
+            greeter,
             ProximityGreeter(row=0),
-            light,
-            MoodEngine(),
+            bottom,
+            MoodEngine(emotion=emotion, **light_kw),
+            ButtonEvent(row=0),
+            *nudges,
         ]
+        if memory is None:
+            behaviors.insert(1, PresenceGreeter(row=0))  # MemoryGreeter covers presence itself
         print("Kivo is awake - press Ctrl+C to stop")
 
     brain = Brain(client, behaviors, sensors=DEFAULT_SENSORS)
@@ -224,6 +258,9 @@ def _cmd_run(client: DeviceClient, args: argparse.Namespace) -> int:
         brain.run()
     except KeyboardInterrupt:
         print("\nKivo is sleeping")
+    finally:
+        if emotion is not None:
+            emotion.stop()
     return 0
 
 
@@ -279,6 +316,24 @@ def build_parser() -> argparse.ArgumentParser:
         "--model",
         help="Ollama model for --ai (default: env KIVO_OLLAMA_MODEL or 'llama3'). "
         "A small model (e.g. llama3.2:3b) reacts much faster.",
+    )
+    run.add_argument(
+        "--camera",
+        action="store_true",
+        help="read your facial expression from the webcam (local, free) to drive "
+        "Kivo's mood. Needs the vision extra: pip install -e .[vision]",
+    )
+    run.add_argument(
+        "--forget",
+        action="store_true",
+        help="don't use or update long-term memory this session (Kivo won't "
+        "remember you across runs)",
+    )
+    run.add_argument(
+        "--pomodoro",
+        action="store_true",
+        help="show a pomodoro focus/break timer on the LCD (chimes at each "
+        "switch) instead of the passive break nudge",
     )
     run.set_defaults(func=_cmd_run)
 

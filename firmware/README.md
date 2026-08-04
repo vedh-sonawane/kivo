@@ -30,7 +30,7 @@ pio device monitor -b 115200  # watch the serial link
 
 > **Windows note:** `pio test -e native` needs a host C/C++ compiler on `PATH`.
 > On this machine that is the MSYS2 mingw64 toolchain, which is visible from a
-> Git Bash / MSYS2 shell but **not** from a stock PowerShell — so run the native
+> Git Bash / MSYS2 shell but **not** from a stock PowerShell - so run the native
 > tests from Bash. The `uno` build/upload/monitor commands work from any shell
 > because they use PlatformIO's own bundled AVR toolchain.
 
@@ -43,7 +43,7 @@ pio device monitor -b 115200  # watch the serial link
 3. Register it by adding one row to `KIVO_HANDLERS`.
 4. Add the operation to `/protocol/README.md` and mirror the backend side.
 
-Nothing else — the transport, parser, and dispatcher are untouched.
+Nothing else - the transport, parser, and dispatcher are untouched.
 
 ## Constraints to respect
 

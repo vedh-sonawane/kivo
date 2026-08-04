@@ -1,4 +1,4 @@
-"""The device capability layer — the backend's high-level handle on Kivo.
+"""The device capability layer - the backend's high-level handle on Kivo.
 
 :class:`DeviceClient` turns capability calls (``ping()``, ``display_write(...)``,
 ``sensor_read(...)``) into protocol commands, sends them over a
@@ -137,7 +137,7 @@ class DeviceClient:
         self.request(Operation.DISPLAY_CLEAR)
 
     def led_set(self, r: int, g: int, b: int) -> None:
-        """Set the RGB LED. Each channel is 0 (off) or 1 (on) — the device does
+        """Set the RGB LED. Each channel is 0 (off) or 1 (on) - the device does
         digital colour, so the host mixes from the 7 primaries."""
         self.request(Operation.LED_SET, f"{r} {g} {b}")
 
@@ -145,6 +145,11 @@ class DeviceClient:
         """Play a tone of ``freq`` Hz for ``ms`` milliseconds (non-blocking on the
         device). ``freq`` 0 stops any tone."""
         self.request(Operation.TONE_PLAY, f"{freq} {ms}")
+
+    def servo_set(self, angle: int) -> None:
+        """Move the servo to ``angle`` degrees (0-180). The host sequences a
+        gesture from a series of these; the device just holds the last angle."""
+        self.request(Operation.SERVO_SET, str(angle))
 
     def sensor_read(self, name: str) -> SensorReading:
         """One-shot read of a named sensor. Raises on an unknown sensor."""

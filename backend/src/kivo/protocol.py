@@ -1,4 +1,4 @@
-"""Kivo Serial Protocol — host-side implementation of ``/protocol/README.md``.
+"""Kivo Serial Protocol - host-side implementation of ``/protocol/README.md``.
 
 One module covering the whole wire protocol: CRC-8 integrity, error types, the
 vocabulary (operation/event/status names), typed messages, and the codec that
@@ -91,6 +91,7 @@ class Operation:
     SENSOR_UNSUBSCRIBE = "SENSOR.UNSUBSCRIBE"
     LED_SET = "LED.SET"
     TONE_PLAY = "TONE.PLAY"
+    SERVO_SET = "SERVO.SET"
 
 
 class EventName:
@@ -233,7 +234,7 @@ def decode(line: str) -> Frame:
     if crc.upper() != expected:
         raise ProtocolError(f"CRC mismatch: got {crc!r}, expected {expected!r}")
 
-    # "TYPE id body..." — split into three so a body with spaces stays intact.
+    # "TYPE id body..." - split into three so a body with spaces stays intact.
     parts = payload.split(" ", 2)
     if len(parts) < 2:
         raise ProtocolError(f"malformed frame: {payload!r}")

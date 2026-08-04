@@ -21,12 +21,12 @@ Build the firmware as a **PlatformIO** project using the Arduino framework for t
   are reproducible.
 - **Native unit testing.** PlatformIO can run tests on the host with the Unity framework.
   We keep the protocol logic Arduino-independent (`lib/kivo_protocol`) so CRC and frame
-  parsing are tested on the PC — fast, and no board required.
+  parsing are tested on the PC - fast, and no board required.
 - **CLI / CI friendly.** `pio run` / `pio test` work headless; the Arduino IDE does not.
 
 ## Alternatives considered
 
-- **Arduino IDE + `.ino`:** rejected — the single-sketch model is the exact thing we are
+- **Arduino IDE + `.ino`:** rejected - the single-sketch model is the exact thing we are
   avoiding, and it has no test story.
 - **Bare avr-gcc + Makefile:** maximum control, but we would reimplement what PlatformIO
   already does well, at a cost in clarity that this project does not want to pay.

@@ -1,4 +1,4 @@
-# Kivo — Architecture Overview
+# Kivo - Architecture Overview
 
 Kivo is an AI-capable physical desk companion built around an **ELEGOO Uno R3**
 (ATmega328P). This document explains the shape of the system and the reasoning behind
@@ -7,8 +7,8 @@ it. Individual decisions with trade-offs are recorded as ADRs in `docs/adr/`.
 ## Guiding principles
 
 1. **The Uno is the hands; the host is the brain.** The Uno exposes *capabilities*
-   (write to the LCD, set an LED, read a sensor). All decision-making — logic,
-   scheduling, AI, automation, logging — lives on the host. The Uno stores as little
+   (write to the LCD, set an LED, read a sensor). All decision-making - logic,
+   scheduling, AI, automation, logging - lives on the host. The Uno stores as little
    state as possible.
 2. **The Uno is a hard design constraint, not a stepping stone.** 32 KB flash, 2 KB
    SRAM, one USB-serial UART. We build the best system we can *around* it, and we do not
@@ -49,16 +49,16 @@ it. Individual decisions with trade-offs are recorded as ADRs in `docs/adr/`.
 ```
 
 The **protocol** (`/protocol/README.md`) is the contract between the two halves. It is
-implemented twice — once per language — and both implementations are unit-tested against
+implemented twice - once per language - and both implementations are unit-tested against
 the same rules. See ADR-0003.
 
 ## Repository layout
 
 ```
 kivo/
-  protocol/     The wire-protocol spec — the source of truth for both sides.
+  protocol/     The wire-protocol spec - the source of truth for both sides.
   firmware/     PlatformIO project for the Uno (C++).
-  backend/      Python package `kivo` — the host software.
+  backend/      Python package `kivo` - the host software.
   docs/         Architecture overview + ADRs.
 ```
 
@@ -91,7 +91,7 @@ The firmware is a PlatformIO project (ADR-0002), not a single `.ino` sketch. It 
 **cooperative main loop with no blocking `delay()`**, so that many capabilities can be
 serviced responsively at once. Serial reception is buffered line-by-line; a completed
 line is parsed, its CRC verified, and dispatched by operation name to a handler. Adding
-a capability means adding a driver + a handler and registering it — nothing else changes.
+a capability means adding a driver + a handler and registering it - nothing else changes.
 
 To keep native (host) unit testing possible, the pure protocol logic (framing + CRC)
 lives in `firmware/lib/kivo_protocol` with **no Arduino dependencies**, so it compiles

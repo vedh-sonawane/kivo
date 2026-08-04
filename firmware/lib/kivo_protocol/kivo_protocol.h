@@ -1,4 +1,4 @@
-// Kivo Serial Protocol — device-side framing + integrity.
+// Kivo Serial Protocol - device-side framing + integrity.
 //
 // This module is intentionally free of any Arduino dependency so it compiles
 // and is unit-tested on the host (PlatformIO `native` environment) exactly as

@@ -38,10 +38,10 @@
 // works (avoid the LCD pins 2-5,11,12 and the serial pins 0,1). Reads 0 or 1.
 #define KIVO_SENSOR_PRESENCE_PIN 7
 
-// HC-SR04 ultrasonic range finder (distance) — how close the nearest object is,
+// HC-SR04 ultrasonic range finder (distance) - how close the nearest object is,
 // in centimetres. TRIG is an output pulse, ECHO an input whose HIGH time encodes
 // the distance. Wire VCC->5V, GND->GND, TRIG->pin 9, ECHO->pin 10 (the Uno is
-// 5V, so ECHO connects directly — no level divider needed). Its change threshold
+// 5V, so ECHO connects directly - no level divider needed). Its change threshold
 // is a few cm so normal jitter doesn't spam the link.
 #define KIVO_SENSOR_DISTANCE_TRIG_PIN 9
 #define KIVO_SENSOR_DISTANCE_ECHO_PIN 10
@@ -65,6 +65,20 @@
 // Buzzer for Kivo's chirps. One pin driven with tone() (non-blocking). A passive
 // buzzer plays pitches; an active buzzer just clicks/buzzes. Other leg to GND.
 #define KIVO_BUZZER_PIN A2
+
+// Servo for Kivo's body language (nod / perk / droop). Signal on one pin (the
+// Servo library uses Timer1, so any digital pin works and it doesn't clash with
+// tone()/millis()). Signal -> A3, red -> 5V, brown -> GND. A servo can draw more
+// than USB comfortably supplies under load; if it twitches or the Uno resets,
+// power the servo from a separate 5V supply sharing GND with the Uno.
+#define KIVO_SERVO_PIN A3
+
+// Push button for two-way interaction (tap / double-tap / hold). Wire it between
+// the pin and GND - INPUT_PULLUP means no resistor needed and pressed reads LOW.
+// The button is debounced and streamed as a `SENSOR button 0/1` event every loop
+// (fast, so short taps aren't missed); the host reads the gesture from the timing.
+#define KIVO_BUTTON_PIN A4
+#define KIVO_BUTTON_DEBOUNCE_MS 25
 
 // -- Protocol vocabulary (mirror of the backend's names in kivo/protocol.py) --
 // The shared /protocol/README.md spec is the contract that keeps the two in
